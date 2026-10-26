@@ -100,6 +100,26 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .lbl{font-size:12.5px;font-weight:500;text-align:center;line-height:1.25;max-width:84px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+/* favorites */
+.tw{position:relative}
+.fav{position:absolute;top:-6px;left:calc(50% - min(50%, 34px) - 6px);z-index:1;width:26px;height:26px;padding:0;
+  border-radius:50%;border:1px solid var(--sheet-line);background:var(--sheet);color:var(--muted);
+  font-size:15px;line-height:1;display:grid;place-items:center;cursor:pointer;opacity:.75}
+.fav[aria-pressed="true"]{color:#E0A100;opacity:1;border-color:#E0A100}
+.fav:focus-visible{outline:3px solid var(--focus);outline-offset:2px;opacity:1}
+.dock .fav{display:none}
+.sync{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+.sync b{color:var(--ink);font-weight:500;overflow-wrap:anywhere}
+.sync form{display:flex;gap:6px;flex:1;min-width:220px}
+.sync input{flex:1;min-width:0;font:inherit;font-size:14px;color:var(--ink);background:var(--chip);
+  border:1px solid var(--glass-line);border-radius:10px;padding:7px 10px}
+.sync button,.favbig{font:inherit;font-size:13px;font-weight:500;border:0;border-radius:10px;padding:7px 12px;
+  background:var(--btn-bg);color:var(--btn-fg);cursor:pointer;white-space:nowrap}
+.sync button.ghost{background:var(--chip);color:var(--ink)}
+.sync input:focus-visible,.sync button:focus-visible,.favbig:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.favbig{display:block;width:100%;margin-bottom:10px;padding:12px;font-size:15px;background:var(--chip);color:var(--ink)}
+.favbig[aria-pressed="true"]{color:#B07E00}
+
 .empty{text-align:center;color:var(--muted);padding:50px 0}
 .empty button{margin-top:10px;font:inherit;border:0;border-radius:999px;padding:8px 16px;background:var(--btn-bg);color:var(--btn-fg);cursor:pointer}
 
@@ -150,6 +170,7 @@ footer a{color:inherit}
     <div>
       <h1>복지 AI 앱스페이스</h1>
       <p class="sub">복지인사이트가 고른 현장용 AI <span class="count" id="total"></span></p>
+      <div class="sync" id="sync" aria-live="polite"></div>
     </div>
   </div>
 
@@ -184,10 +205,18 @@ footer a{color:inherit}
   <p class="sh-desc" id="sh-desc"></p>
   <p class="sh-use"><b>현장 활용</b><span id="sh-use"></span></p>
   <div class="sh-tags" id="sh-tags"></div>
+  <button class="favbig" id="sh-fav" aria-pressed="false"></button>
   <a class="open" id="sh-open" target="_blank" rel="noopener noreferrer"></a>
 </div>
 
 <script>
+/* 즐겨찾기 DB 연결 (Supabase)
+   비워 두면 즐겨찾기가 이 브라우저에만 저장됩니다.
+   Supabase 프로젝트 URL과 anon(public) 키를 넣으면 이메일 로그인 후 계정에 저장됩니다.
+   설정 방법은 README.md, 테이블은 supabase.sql 참고 */
+const SUPABASE_URL = "";
+const SUPABASE_ANON_KEY = "";
+
 const CATS = [
   {id:"chat", name:"AI 비서", g:["#5E7A43","#33461F"]},
   {id:"agent", name:"AI 브라우저·에이전트", g:["#4A4F5C","#25282F"]},
@@ -199,7 +228,8 @@ const CATS = [
   {id:"audio", name:"음성·음악", g:["#4467AA","#253D70"]},
   {id:"translate", name:"번역·다문화", g:["#4F8B60","#2C5638"]},
   {id:"build", name:"업무도구 만들기", g:["#A0782A","#5F4614"]},
-  {id:"apikey", name:"API 키 발급", g:["#8A3E7A","#521F47"]}
+  {id:"apikey", name:"API 키 발급", g:["#8A3E7A","#521F47"]},
+  {id:"insight", name:"복지인사이트 AI Tool", g:["#3D4429","#20241A"]}
 ];
 const APPS = [
   {c:"chat",n:"ChatGPT",m:"GPT",u:"https://chatgpt.com",hot:1,d:"가장 많이 쓰는 대화형 AI. 글쓰기, 요약, 이미지 생성, 파일 분석을 한 곳에서.",x:"사업계획서 초안, 가정통신문, 이미지까지 한 번에",t:["무료 시작","한국어"]},
@@ -250,7 +280,10 @@ const APPS = [
   {c:"apikey",n:"OpenAI 결제",m:"OA결제",u:"https://platform.openai.com/settings/organization/billing",d:"OpenAI API 크레딧 충전과 사용량·한도 설정 화면입니다.",x:"API 사용 전 크레딧 충전, 월 사용 한도 걸어 두기",t:["결제·크레딧"]},
   {c:"apikey",n:"Claude 키",m:"Cl키",u:"https://console.anthropic.com/settings/keys",d:"Claude(Anthropic) API 키를 만드는 곳. 환경변수 이름은 ANTHROPIC_API_KEY입니다. 키는 비밀번호처럼 다루고 공유하지 마세요.",x:"직접 만든 웹앱·자동화에 Claude 연결하기",t:["ANTHROPIC_API_KEY","결제 필요"]},
   {c:"apikey",n:"Claude 결제",m:"Cl결제",u:"https://console.anthropic.com/settings/billing",d:"Anthropic API 크레딧 충전과 결제 정보 화면입니다.",x:"API 사용 전 크레딧 충전, 사용량 확인",t:["결제·크레딧"]},
-  {c:"apikey",n:"Gemini 키",m:"Ge키",u:"https://aistudio.google.com/apikey",d:"Gemini(구글) API 키를 만드는 곳. 환경변수 이름은 보통 GEMINI_API_KEY입니다. 키는 비밀번호처럼 다루고 공유하지 마세요.",x:"무료 사용량으로 웹앱에 Gemini 연결해 보기",t:["GEMINI_API_KEY","무료 사용량"]}
+  {c:"apikey",n:"Gemini 키",m:"Ge키",u:"https://aistudio.google.com/apikey",d:"Gemini(구글) API 키를 만드는 곳. 환경변수 이름은 보통 GEMINI_API_KEY입니다. 키는 비밀번호처럼 다루고 공유하지 마세요.",x:"무료 사용량으로 웹앱에 Gemini 연결해 보기",t:["GEMINI_API_KEY","무료 사용량"]},
+  {c:"insight",n:"AI 스터디 카페",name:"사회복지 AI 스터디 카페",m:"카페",u:"https://cafe.naver.com/mediahelper",d:"복지인사이트가 운영하는 사회복지 챗GPT·홍보콘텐츠 스터디 네이버 카페입니다.",x:"교육 자료 다시 보기, 현장 활용 사례 나누기, 질문하기",t:["무료","복지인사이트"]},
+  {c:"insight",n:"로컬앱스",m:"로컬",u:"https://vibe-welfare-index.lovable.app/",d:"복지인사이트가 모아 둔 사회복지 현장용 앱 모음입니다.",x:"우리 기관에 맞는 업무용 앱 찾아보기",t:["무료","복지인사이트"]},
+  {c:"insight",n:"복지 웹앱",m:"웹앱",u:"https://welfare-vibe.lovable.app/",d:"복지인사이트가 만든 사회복지 업무용 웹앱입니다.",x:"현장 업무에 바로 쓰는 웹앱 사용하기",t:["무료","복지인사이트"]}
 ];
 APPS.forEach((a,i)=>a.no=i+1);
 const DOCK = ["ChatGPT","Gemini","Claude","클로바노트"];
@@ -264,23 +297,90 @@ try{ const s=localStorage.getItem("aispace-mode"); if(s==="info"||s==="open") mo
 const $ = id => document.getElementById(id);
 const icon = a => {const g=catOf(a.c).g;
   return `<span class="ico" style="--g1:${g[0]};--g2:${g[1]}"><span class="mono" style="--fs:${fs(a.m)}">${esc(a.m)}</span><span class="badge">${a.no}</span></span>`;};
-const tile = a => `<a class="app" href="${a.u}" target="_blank" rel="noopener noreferrer" data-no="${a.no}" aria-label="${a.no}번 ${esc(a.n)}">${icon(a)}<span class="lbl">${esc(a.n)}</span></a>`;
+const tile = a => `<div class="tw"><a class="app" href="${a.u}" target="_blank" rel="noopener noreferrer" data-no="${a.no}" aria-label="${a.no}번 ${esc(a.n)}">${icon(a)}<span class="lbl">${esc(a.n)}</span></a>`+
+  `<button class="fav" data-key="${esc(a.n)}" aria-pressed="${favs.has(a.n)}" aria-label="${esc(a.n)} 즐겨찾기">${favs.has(a.n)?"★":"☆"}</button></div>`;
+
+/* favorites: localStorage + optional Supabase */
+let favs=new Set(), sb=null, user=null, syncMsg="";
+try{ favs=new Set(JSON.parse(localStorage.getItem("aispace-favs")||"[]").filter(k=>APPS.some(a=>a.n===k))); }catch(e){}
+const saveLocal = () => { try{localStorage.setItem("aispace-favs",JSON.stringify([...favs]));}catch(e){} };
+
+async function toggleFav(key){
+  const on=!favs.has(key);
+  on?favs.add(key):favs.delete(key); saveLocal(); refresh();
+  if(!sb||!user) return;
+  const {error} = on
+    ? await sb.from("favorites").upsert({app_key:key},{onConflict:"user_id,app_key",ignoreDuplicates:true})
+    : await sb.from("favorites").delete().eq("app_key",key);
+  if(error){ on?favs.delete(key):favs.add(key); saveLocal(); refresh(); syncMsg="저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요."; renderSync(); }
+}
+async function pullFavs(){
+  if(favs.size){
+    await sb.from("favorites").upsert([...favs].map(k=>({app_key:k})),{onConflict:"user_id,app_key",ignoreDuplicates:true});
+  }
+  const {data,error}=await sb.from("favorites").select("app_key");
+  if(error){ syncMsg="즐겨찾기를 불러오지 못했습니다."; renderSync(); return; }
+  favs=new Set(data.map(r=>r.app_key).filter(k=>APPS.some(a=>a.n===k))); saveLocal(); refresh();
+}
+function renderSync(){
+  const el=$("sync"), typed=$("email")?$("email").value:"";
+  if(!SUPABASE_URL){ el.innerHTML=`<span>☆를 눌러 즐겨찾기 · 이 브라우저에 저장됩니다</span>`; return; }
+  if(!sb){ el.innerHTML=`<span>즐겨찾기 연결 중…</span>`; return; }
+  if(user){
+    el.innerHTML=`<span>★ <b>${esc(user.email||"내 계정")}</b> 계정에 즐겨찾기 저장 중</span><button class="ghost" id="logout">로그아웃</button>`;
+    $("logout").onclick=async()=>{ await sb.auth.signOut(); favs=new Set(); saveLocal(); syncMsg=""; refresh(); };
+  }else{
+    el.innerHTML=`<span>즐겨찾기를 내 계정에 저장하려면 로그인하세요</span>
+      <form id="login"><input type="email" id="email" required placeholder="이메일 주소" aria-label="이메일 주소" autocomplete="email"><button>로그인 링크 받기</button></form>`;
+    $("email").value=typed;
+    $("login").onsubmit=async e=>{
+      e.preventDefault();
+      const email=$("email").value.trim();
+      const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
+      syncMsg = error ? "링크를 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요." : `${email} 주소로 로그인 링크를 보냈습니다. 메일함에서 링크를 눌러 주세요.`;
+      renderSync();
+    };
+  }
+  if(syncMsg) el.insertAdjacentHTML("beforeend",`<span style="flex-basis:100%">${esc(syncMsg)}</span>`);
+}
+function initDB(){
+  renderSync();
+  if(!SUPABASE_URL) return;
+  const sc=document.createElement("script");
+  sc.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js";
+  sc.onload=()=>{
+    sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+    sb.auth.onAuthStateChange((ev,session)=>{
+      const was=user&&user.id; user=session?session.user:null; renderSync();
+      if(user && user.id!==was) setTimeout(pullFavs,0);
+    });
+  };
+  sc.onerror=()=>{ syncMsg="즐겨찾기 서버에 연결하지 못해 이 브라우저에 저장합니다."; sb=null; $("sync").innerHTML=`<span>${syncMsg}</span>`; };
+  document.head.appendChild(sc);
+}
 
 function renderChips(){
-  const all=[{id:"all",name:"전체"},{id:"hot",name:"많이 쓰는 앱"},...CATS];
+  const all=[{id:"all",name:"전체"},{id:"fav",name:"★ 즐겨찾기"},{id:"hot",name:"많이 쓰는 앱"},...CATS];
   $("chips").innerHTML = all.map(c=>`<button class="chip" data-id="${c.id}" aria-pressed="${c.id===current}">${c.name}</button>`).join("");
 }
 function render(){
   const term=$("q").value.trim().toLowerCase();
-  const cats=(current==="all"||current==="hot")?CATS:CATS.filter(c=>c.id===current);
+  const match=a=>!term||(a.n+" "+a.m+" "+a.d+" "+a.x+" "+a.t.join(" ")+" "+catOf(a.c).name).toLowerCase().includes(term);
+  const section=(id,name,apps)=>`<section class="folder" data-sec="${id}"><h2>${name}<span>${apps.length}개</span></h2><div class="apps">${apps.map(tile).join("")}</div></section>`;
   let html="";
-  for(const cat of cats){
-    const apps=APPS.filter(a=>a.c===cat.id&&(current!=="hot"||a.hot)&&
-      (!term||(a.n+" "+a.m+" "+a.d+" "+a.x+" "+a.t.join(" ")+" "+cat.name).toLowerCase().includes(term)));
-    if(!apps.length) continue;
-    html+=`<section class="folder"><h2>${cat.name}<span>${apps.length}개</span></h2><div class="apps">${apps.map(tile).join("")}</div></section>`;
+  if(current==="all"||current==="fav"){
+    const apps=APPS.filter(a=>favs.has(a.n)&&match(a));
+    if(apps.length) html+=section("fav","★ 내 즐겨찾기",apps);
   }
-  $("home").innerHTML = html || `<div class="empty">찾는 앱이 없습니다. 다른 단어로 검색해 보세요.<br><button id="reset">전체 보기</button></div>`;
+  const cats=current==="fav"?[]:(current==="all"||current==="hot")?CATS:CATS.filter(c=>c.id===current);
+  for(const cat of cats){
+    const apps=APPS.filter(a=>a.c===cat.id&&(current!=="hot"||a.hot)&&match(a));
+    if(apps.length) html+=section(cat.id,cat.name,apps);
+  }
+  const none = current==="fav"&&!term&&!favs.size
+    ? `<div class="empty">아직 즐겨찾기한 앱이 없습니다.<br>앱 아이콘 왼쪽 위 ☆를 누르면 여기에 모입니다.<br><button id="reset">전체 보기</button></div>`
+    : `<div class="empty">찾는 앱이 없습니다. 다른 단어로 검색해 보세요.<br><button id="reset">전체 보기</button></div>`;
+  $("home").innerHTML = html || none;
   const r=$("reset"); if(r) r.onclick=()=>{$("q").value="";current="all";renderChips();render();};
 }
 function renderDock(){ $("dock").innerHTML = DOCK.map(n=>tile(APPS.find(a=>a.n===n))).join(""); }
@@ -299,9 +399,26 @@ function openSheet(a){
   $("sh-desc").textContent=a.d;
   $("sh-use").textContent=a.x;
   $("sh-tags").innerHTML=(a.hot?["많이 씀"]:[]).concat(a.t).map(t=>`<span>${t}</span>`).join("");
+  sheetApp=a; renderSheetFav();
   const o=$("sh-open"); o.href=a.u; o.textContent=`${a.n} 열기`;
   $("scrim").classList.add("on"); $("sheet").classList.add("on"); $("sheet").setAttribute("aria-hidden","false");
   o.focus();
+}
+let sheetApp=null;
+function renderSheetFav(){
+  if(!sheetApp) return;
+  const on=favs.has(sheetApp.n), b=$("sh-fav");
+  b.setAttribute("aria-pressed",on); b.textContent=on?"★ 즐겨찾기에서 빼기":"☆ 즐겨찾기에 추가";
+}
+function refresh(){
+  const f=document.activeElement, key=f&&f.classList.contains("fav")?f.dataset.key:null;
+  const sec=key&&f.closest("[data-sec]")?f.closest("[data-sec]").dataset.sec:null;
+  render(); renderDock(); renderSheetFav();
+  if(key){
+    const k=CSS.escape(key);
+    const t=document.querySelector(`[data-sec="${sec}"] .fav[data-key="${k}"]`)||document.querySelector(`#home .fav[data-key="${k}"]`);
+    if(t) t.focus();
+  }
 }
 function closeSheet(){
   $("scrim").classList.remove("on"); $("sheet").classList.remove("on"); $("sheet").setAttribute("aria-hidden","true");
@@ -309,6 +426,8 @@ function closeSheet(){
 }
 
 document.addEventListener("click",e=>{
+  const fav=e.target.closest(".fav");
+  if(fav){ toggleFav(fav.dataset.key); return; }
   const app=e.target.closest(".app");
   if(app && mode==="info"){ e.preventDefault(); openSheet(APPS[+app.dataset.no-1]); return; }
   const chip=e.target.closest(".chip");
@@ -318,11 +437,12 @@ document.addEventListener("click",e=>{
   if(seg){ mode=seg.dataset.mode; renderMode(); try{localStorage.setItem("aispace-mode",mode);}catch(err){} }
 });
 $("scrim").onclick=closeSheet;
+$("sh-fav").onclick=()=>{ if(sheetApp) toggleFav(sheetApp.n); };
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeSheet(); });
 $("q").addEventListener("input",render);
 
 $("total").textContent=APPS.length+"개";
-renderChips(); renderMode(); render(); renderDock();
+renderChips(); renderMode(); render(); renderDock(); initDB();
 </script>
 </body>
 </html>

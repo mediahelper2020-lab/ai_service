@@ -108,16 +108,10 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .fav[aria-pressed="true"]{color:#E0A100;opacity:1;border-color:#E0A100}
 .fav:focus-visible{outline:3px solid var(--focus);outline-offset:2px;opacity:1}
 .dock .fav{display:none}
-.sync{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
-.sync b{color:var(--ink);font-weight:500;overflow-wrap:anywhere}
-.sync form{display:flex;gap:6px;flex:1;min-width:220px}
-.sync input{flex:1;min-width:0;font:inherit;font-size:14px;color:var(--ink);background:var(--chip);
-  border:1px solid var(--glass-line);border-radius:10px;padding:7px 10px}
-.sync button,.favbig{font:inherit;font-size:13px;font-weight:500;border:0;border-radius:10px;padding:7px 12px;
-  background:var(--btn-bg);color:var(--btn-fg);cursor:pointer;white-space:nowrap}
-.sync button.ghost{background:var(--chip);color:var(--ink)}
-.sync input:focus-visible,.sync button:focus-visible,.favbig:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
-.favbig{display:block;width:100%;margin-bottom:10px;padding:12px;font-size:15px;background:var(--chip);color:var(--ink)}
+.sync{margin-top:10px;font-size:13px;color:var(--muted)}
+.favbig{display:block;width:100%;margin-bottom:10px;padding:12px;border:0;border-radius:10px;font:inherit;font-size:15px;font-weight:500;
+  background:var(--chip);color:var(--ink);cursor:pointer}
+.favbig:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .favbig[aria-pressed="true"]{color:#B07E00}
 
 .empty{text-align:center;color:var(--muted);padding:50px 0}
@@ -210,13 +204,6 @@ footer a{color:inherit}
 </div>
 
 <script>
-/* 즐겨찾기 DB 연결 (Supabase)
-   비워 두면 즐겨찾기가 이 브라우저에만 저장됩니다.
-   Supabase 프로젝트 URL과 anon(public) 키를 넣으면 이메일 로그인 후 계정에 저장됩니다.
-   설정 방법은 README.md, 테이블은 supabase.sql 참고 */
-const SUPABASE_URL = "";
-const SUPABASE_ANON_KEY = "";
-
 const CATS = [
   {id:"chat", name:"AI 비서", g:["#5E7A43","#33461F"]},
   {id:"agent", name:"AI 브라우저·에이전트", g:["#4A4F5C","#25282F"]},
@@ -300,63 +287,41 @@ const icon = a => {const g=catOf(a.c).g;
 const tile = a => `<div class="tw"><a class="app" href="${a.u}" target="_blank" rel="noopener noreferrer" data-no="${a.no}" aria-label="${a.no}번 ${esc(a.n)}">${icon(a)}<span class="lbl">${esc(a.n)}</span></a>`+
   `<button class="fav" data-key="${esc(a.n)}" aria-pressed="${favs.has(a.n)}" aria-label="${esc(a.n)} 즐겨찾기">${favs.has(a.n)?"★":"☆"}</button></div>`;
 
-/* favorites: localStorage + optional Supabase */
-let favs=new Set(), sb=null, user=null, syncMsg="";
-try{ favs=new Set(JSON.parse(localStorage.getItem("aispace-favs")||"[]").filter(k=>APPS.some(a=>a.n===k))); }catch(e){}
-const saveLocal = () => { try{localStorage.setItem("aispace-favs",JSON.stringify([...favs]));}catch(e){} };
+/* favorites: IndexedDB (이 브라우저에 저장, 외부 서버 없음) */
+let favs=new Set();
+const favDB = (()=>{
+  let dbp=null;
+  const open = () => dbp ||= new Promise((res,rej)=>{
+    const r=indexedDB.open("aispace",1);
+    r.onupgradeneeded=()=>r.result.createObjectStore("favorites",{keyPath:"key"});
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  });
+  const run = (mode,fn) => open().then(db=>new Promise((res,rej)=>{
+    const tx=db.transaction("favorites",mode), req=fn(tx.objectStore("favorites"));
+    tx.oncomplete=()=>res(req.result); tx.onerror=()=>rej(tx.error);
+  }));
+  return {
+    all: () => run("readonly",st=>st.getAllKeys()),
+    add: key => run("readwrite",st=>st.put({key,added:Date.now()})),
+    remove: key => run("readwrite",st=>st.delete(key))
+  };
+})();
 
+function renderSync(msg){
+  $("sync").textContent = msg || "☆를 누르면 즐겨찾기에 추가됩니다 · 이 브라우저에 저장";
+}
 async function toggleFav(key){
   const on=!favs.has(key);
-  on?favs.add(key):favs.delete(key); saveLocal(); refresh();
-  if(!sb||!user) return;
-  const {error} = on
-    ? await sb.from("favorites").upsert({app_key:key},{onConflict:"user_id,app_key",ignoreDuplicates:true})
-    : await sb.from("favorites").delete().eq("app_key",key);
-  if(error){ on?favs.delete(key):favs.add(key); saveLocal(); refresh(); syncMsg="저장하지 못했습니다. 잠시 뒤 다시 눌러 주세요."; renderSync(); }
+  on?favs.add(key):favs.delete(key); refresh();
+  try{ await (on?favDB.add(key):favDB.remove(key)); }
+  catch(e){ renderSync("이 브라우저에서는 즐겨찾기를 저장할 수 없어 새로고침하면 사라집니다. (시크릿 창 등)"); }
 }
-async function pullFavs(){
-  if(favs.size){
-    await sb.from("favorites").upsert([...favs].map(k=>({app_key:k})),{onConflict:"user_id,app_key",ignoreDuplicates:true});
-  }
-  const {data,error}=await sb.from("favorites").select("app_key");
-  if(error){ syncMsg="즐겨찾기를 불러오지 못했습니다."; renderSync(); return; }
-  favs=new Set(data.map(r=>r.app_key).filter(k=>APPS.some(a=>a.n===k))); saveLocal(); refresh();
-}
-function renderSync(){
-  const el=$("sync"), typed=$("email")?$("email").value:"";
-  if(!SUPABASE_URL){ el.innerHTML=`<span>☆를 눌러 즐겨찾기 · 이 브라우저에 저장됩니다</span>`; return; }
-  if(!sb){ el.innerHTML=`<span>즐겨찾기 연결 중…</span>`; return; }
-  if(user){
-    el.innerHTML=`<span>★ <b>${esc(user.email||"내 계정")}</b> 계정에 즐겨찾기 저장 중</span><button class="ghost" id="logout">로그아웃</button>`;
-    $("logout").onclick=async()=>{ await sb.auth.signOut(); favs=new Set(); saveLocal(); syncMsg=""; refresh(); };
-  }else{
-    el.innerHTML=`<span>즐겨찾기를 내 계정에 저장하려면 로그인하세요</span>
-      <form id="login"><input type="email" id="email" required placeholder="이메일 주소" aria-label="이메일 주소" autocomplete="email"><button>로그인 링크 받기</button></form>`;
-    $("email").value=typed;
-    $("login").onsubmit=async e=>{
-      e.preventDefault();
-      const email=$("email").value.trim();
-      const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
-      syncMsg = error ? "링크를 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요." : `${email} 주소로 로그인 링크를 보냈습니다. 메일함에서 링크를 눌러 주세요.`;
-      renderSync();
-    };
-  }
-  if(syncMsg) el.insertAdjacentHTML("beforeend",`<span style="flex-basis:100%">${esc(syncMsg)}</span>`);
-}
-function initDB(){
+async function initDB(){
   renderSync();
-  if(!SUPABASE_URL) return;
-  const sc=document.createElement("script");
-  sc.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js";
-  sc.onload=()=>{
-    sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
-    sb.auth.onAuthStateChange((ev,session)=>{
-      const was=user&&user.id; user=session?session.user:null; renderSync();
-      if(user && user.id!==was) setTimeout(pullFavs,0);
-    });
-  };
-  sc.onerror=()=>{ syncMsg="즐겨찾기 서버에 연결하지 못해 이 브라우저에 저장합니다."; sb=null; $("sync").innerHTML=`<span>${syncMsg}</span>`; };
-  document.head.appendChild(sc);
+  try{
+    const keys=await favDB.all();
+    favs=new Set(keys.filter(k=>APPS.some(a=>a.n===k))); refresh();
+  }catch(e){ renderSync("이 브라우저에서는 즐겨찾기를 저장할 수 없어 새로고침하면 사라집니다. (시크릿 창 등)"); }
 }
 
 function renderChips(){
